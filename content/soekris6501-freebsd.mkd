@@ -1,0 +1,150 @@
+Title: Installing FreeBSD 10 AMD64 on a Soekris 6501 (the long way ...)
+Date: 2013-11-12
+Category: Tutorials
+Tags: freebsd, soekris
+Slug: freebsd-soekris-6501
+Author: Julien Cigar
+Summary: This is an installation guide for installing FreeBSD on a Soekris net6501
+
+# The hardware #
+
+[Soekris Engineering](http://soekris.com) is a small company specializing in the design of embedded computer and communication devices. Their boxes are primarily used for networking (firewalls, routers, VPN, ...), are compact, quiet, low-power (~10W), low-cost and designed for long life.
+
+The [6501](http://soekris.com/products/net6501.html) is based on an Intel Atom E6xx processor, has four 10/100/1000 Mbit ethernet ports and up to 2 GB DDR2-SDRAM of main memory.
+
+<div style="text-align:center">
+    <img src="../images/net6501_BO_front_550pxl.jpg" />
+</div>
+
+# Connecting to the serial console #
+
+The net6501 does not have any video or keyboard interface and uses the serial port for the primary console interface instead. A _null-modem_ cable is required to connect the Soekris box to another computer. Note that a classic RS-232 serial cable will __NOT__ work, even with a gender changer. Also, most new machines nowadays lack serial ports and USB-to-Serial adapters are used instead.
+
+The 6501 serial port default baud rate is 19200 baud (note that FreeBSD communicates at 9600 baud by default), but it can be changed at boot time. The [net6501 manual](http://soekris.com/media/manuals/net6501_manual.pdf) recommends that the connected terminal emulator uses: 19200 baud, 8 databits, no parity, 1 stop bit, no flow control.
+
+In practice you can use [cu(1)](http://www.freebsd.org/cgi/man.cgi?query=cu&sektion=1), [tip(1)](http://www.freebsd.org/cgi/man.cgi?query=tip&sektion=1), or minicom (comms/minicom in ports) to connect your machine to the 6501.
+
+In the rest of this tutorial _cu_ will be used, along with a USB-to-Serial adapter.
+
+Let's try to connect and jump into the comBIOS monitor (press __CTRL + P__):
+
+    :::console
+    % sudo cu -l /dev/ttyU0 -s 19200
+
+After turning on the box you should see something like the following:
+
+<div style="text-align:center">
+<video controls preload="auto">
+    <source src="../videos/soekris-boot.mp4" type='video/mp4'>
+    <source src="../videos/soekris-boot.webm" type='video/webm'>
+</video>
+</div>
+
+If you see garbage on your screen then your communication speed is probably wrong. If it doesn't work at all check that the USB-to-Serial adapter is properly recognized (if you use one), you should see something like the following in the kernel logs once plugged:
+
+    :::console
+    ugen1.2: <FTDI> at usbus1
+    uftdi0: <USB Serial Converter> on usbus1
+
+If not, try to load _uftdi.ko_ and _ucom.ko_:
+
+    :::console
+    % sudo kldload uftdi ucom
+
+# Create a bootable USB drive #
+
+As you might know (or not ..), Soekris boxes have a very special _BIOS_ with no _ACPI_ support. This is kinda problematic as FreeBSD/amd64 pretty much requires _ACPI_. Booting with the default _GENERIC_ kernel results in a panic:
+
+    :::console
+    (...)
+    Booting...
+    ACPI BIOS Error (bug): A valid RSDP was not found (20130823/tbxfroot-223)
+    panic: running without device atpic requires a local APIC
+    cpuid = 0
+    KDB: stack backtrace:
+    #0 0xffffffff808e7dd0 at ??+0
+    #1 0xffffffff808af8b5 at ??+0
+    #2 0xffffffff80d9106f at ??+0
+    #3 0xffffffff80861238 at ??+0
+    #4 0xffffffff802d3e0c at ??+0
+    Uptime: 1s
+
+The good news is that you only need to build a special kernel with __mptable__ and __atpic__ options. The bad news are that, first, you will need to build a new release (replacing just the kernel on the default release will not work) which will take some time and, second, those options are considered as legacy (although they should remain available for some time) and support for non-ACPI configurations could become more and more hazardous in the long run ... The development of an _ACPI BIOS_ would be a very positive thing for the future.
+
+The first thing to do is to get the sources:
+
+    :::console
+    % svn co svn://svn.freebsd.org/base/releng/10.0 ~/soekris/src
+
+Once this is done the next step is to create a custom kernel configuration file in _~/soekris/src/sys/amd64/conf/SOEKRIS_ with the following:
+
+    include GENERIC
+    ident SOEKRIS
+    device atpic
+    device mptable
+
+We are now ready to build the world and the kernel. Some environment variables can be defined for the build targets, the most common are:
+
+* __MAKEOBJDIRPREFIX__: Defines the prefix for directory names in the tree of built objects. Defaults to _/usr/obj_ if not defined.
+* __KERNCONF__: Overrides which kernel to build and install for the various kernel make targets. It defaults to GENERIC.
+* __TARGET__: The target hardware platform (amd64 in this case). It should only be set if your current hardware platform is not amd64.
+
+Apart from __MAKEOBJDIRPREFIX__, those variables can be set on the command line or via _/etc/make.conf_
+
+In this tutorial we'll store the target tree produced by building the _/usr/src_ tree in
+_~/soekris/obj_ (instead of _/usr/obj_) and we have to tell the kernel targets to use our kernel
+configuration file (instead of _GENERIC_):
+
+    :::console
+    % export MAKEOBJDIRPREFIX=~/soekris/obj
+    % export KERNCONF=SOEKRIS
+    % export TARGET=amd64
+
+Now we can launch the build process:
+
+    :::console
+    % make -j 3 -C ~/soekris/src buildworld buildkernel
+
+The next step is to build the release media(s). Some environment variables can also be defined:
+
+* __NOPORTS__: If defined, the Ports Collection will be omitted from the release.
+* __NOSRC__: If set, do not include system source code in the release.
+* __NODOC__: If defined, the XML-based documentation from the FreeBSD Documentation Project will not be built.
+
+With the addition of new daemons (auditdistd, unbound, ...) it is possible that
+some (system) users are missing on your system and therefore running __"mergemaster -p"__ cannot be a bad idea:
+
+    :::console
+    % sudo -E mergemaster -p -m ~/soekris/src
+
+Then:
+
+    :::console
+    % export NOPORTS=yes
+    % export NOSRC=yes
+    % export NODOC=yes
+    % sudo -E make -C ~/soekris/src/release memstick
+
+After that:
+
+    :::console
+    % sudo -E dd if=~/soekris/src/release/memstick.img of=/dev/da0 bs=10240 conv=sync
+    % sudo mount /dev/da0a /mnt
+
+Add the following to /mnt/boot/loader.conf:
+
+    console="comconsole"
+    comconsole_speed="19200"
+
+.. and finally umount:
+
+    :::console
+    % sudo umount /mnt
+
+<div style="text-align:center">
+<video controls preload="auto">
+    <source src="../videos/soekris-install.mp4" type='video/mp4'>
+    <source src="../videos/soekris-install.webm" type='video/webm'>
+</video>
+</div>
+
