@@ -1,5 +1,5 @@
 Title: Installing FreeBSD 10 AMD64 on a Soekris 6501 (the long way ...)
-Date: 2013-11-12
+Date: 2015-07-25
 Category: Tutorials
 Tags: freebsd, soekris
 Slug: freebsd-soekris-6501
@@ -12,8 +12,8 @@ Summary: This is an installation guide for installing FreeBSD on a Soekris net65
 
 The [6501](http://soekris.com/products/net6501.html) is based on an Intel Atom E6xx processor, has four 10/100/1000 Mbit ethernet ports and up to 2 GB DDR2-SDRAM of main memory.
 
-<div style="text-align:center">
-    <img src="../images/net6501_BO_front_550pxl.jpg" />
+<div style="text-align:center" markdown="1">
+![Soekris]({filename}/images/net6501_BO_front_550pxl.jpg)
 </div>
 
 # Connecting to the serial console #
@@ -35,8 +35,8 @@ After turning on the box you should see something like the following:
 
 <div style="text-align:center">
 <video controls preload="auto">
-    <source src="../videos/soekris-boot.mp4" type='video/mp4'>
-    <source src="../videos/soekris-boot.webm" type='video/webm'>
+    <source src="{filename}/videos/soekris-boot.mp4" type='video/mp4'>
+    <source src="{filename}/videos/soekris-boot.webm" type='video/webm'>
 </video>
 </div>
 
@@ -69,40 +69,35 @@ As you might know (or not ..), Soekris boxes have a very special _BIOS_ with no 
     #4 0xffffffff802d3e0c at ??+0
     Uptime: 1s
 
-The good news is that you only need to build a special kernel with __mptable__ and __atpic__ options. The bad news are that, first, you will need to build a new release (replacing just the kernel on the default release will not work) which will take some time and, second, those options are considered as legacy (although they should remain available for some time) and support for non-ACPI configurations could become more and more hazardous in the long run ... The development of an _ACPI BIOS_ would be a very positive thing for the future.
+The good news is that you only need to build a special kernel with __mptable__ and __atpic__ options. The bad news are that, first, you will need to build a new release (replacing just the kernel on the default release will not work) which will take some time and, second, those options are considered as legacy (although they should remain available for some time) and support for non-ACPI configurations could become more and more hazardous in the long run ... The development of an _ACPI BIOS_ would be a very positive thing for the future ...!
 
-The first thing to do is to get the sources:
+Enough talk, let's go practice...!
+
+First, get the sources:
 
     :::console
     % svn co svn://svn.freebsd.org/base/releng/10.0 ~/soekris/src
 
-Once this is done the next step is to create a custom kernel configuration file in _~/soekris/src/sys/amd64/conf/SOEKRIS_ with the following:
+Create a custom kernel configuration file _~/soekris/src/sys/amd64/conf/SOEKRIS_
+with:
 
     include GENERIC
     ident SOEKRIS
     device atpic
     device mptable
 
-We are now ready to build the world and the kernel. Some environment variables can be defined for the build targets, the most common are:
+Some environment variables can be defined for the build targets, the most common are:
 
 * __MAKEOBJDIRPREFIX__: Defines the prefix for directory names in the tree of built objects. Defaults to _/usr/obj_ if not defined.
 * __KERNCONF__: Overrides which kernel to build and install for the various kernel make targets. It defaults to GENERIC.
 * __TARGET__: The target hardware platform (amd64 in this case). It should only be set if your current hardware platform is not amd64.
 
-Apart from __MAKEOBJDIRPREFIX__, those variables can be set on the command line or via _/etc/make.conf_
-
-In this tutorial we'll store the target tree produced by building the _/usr/src_ tree in
-_~/soekris/obj_ (instead of _/usr/obj_) and we have to tell the kernel targets to use our kernel
-configuration file (instead of _GENERIC_):
+Launch the build process with:
 
     :::console
     % export MAKEOBJDIRPREFIX=~/soekris/obj
     % export KERNCONF=SOEKRIS
     % export TARGET=amd64
-
-Now we can launch the build process:
-
-    :::console
     % make -j 3 -C ~/soekris/src buildworld buildkernel
 
 The next step is to build the release media(s). Some environment variables can also be defined:
@@ -112,39 +107,35 @@ The next step is to build the release media(s). Some environment variables can a
 * __NODOC__: If defined, the XML-based documentation from the FreeBSD Documentation Project will not be built.
 
 With the addition of new daemons (auditdistd, unbound, ...) it is possible that
-some (system) users are missing on your system and therefore running __"mergemaster -p"__ cannot be a bad idea:
+some (system) users are missing on your system and therefore running __"mergemaster -p"__ is a good idea.
 
     :::console
     % sudo -E mergemaster -p -m ~/soekris/src
-
-Then:
-
-    :::console
     % export NOPORTS=yes
     % export NOSRC=yes
     % export NODOC=yes
     % sudo -E make -C ~/soekris/src/release memstick
 
-After that:
+Copy the image to the USB stick (adapt /dev/da0 with your device):
 
     :::console
     % sudo -E dd if=~/soekris/src/release/memstick.img of=/dev/da0 bs=10240 conv=sync
+
+The USB stick now contain a bootable installer disk but must be modified to tell the boot loader and kernel to use the serial console instead of the video console. 
+
+Mount the USB stick:
+
+    :::console
     % sudo mount /dev/da0a /mnt
 
-Add the following to /mnt/boot/loader.conf:
+Once the USB stick is mounted, add those lines to _/boot/loader.conf_: 
 
     console="comconsole"
     comconsole_speed="19200"
 
-.. and finally umount:
+Unmount the disk:
 
     :::console
     % sudo umount /mnt
 
-<div style="text-align:center">
-<video controls preload="auto">
-    <source src="../videos/soekris-install.mp4" type='video/mp4'>
-    <source src="../videos/soekris-install.webm" type='video/webm'>
-</video>
-</div>
-
+That's all! 
